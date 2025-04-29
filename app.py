@@ -8,6 +8,7 @@ import requests
 import sqlite3
 import xml.etree.ElementTree as ET
 from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 app = Flask(__name__)
@@ -15,7 +16,8 @@ app = Flask(__name__)
 # Configuração da API do Gmail
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 TOKEN_PATH = "token.json"
-API_EXTERNA_URL = "https://sistema-externo.com/api/notas/"
+CREDENTIALS_PATH = "credentials.json"
+API_EXTERNA_URL = "http://localhost:5001/api/notas/"
 
 # Inicializar banco de dados
 conn = sqlite3.connect("notas_fiscais.db", check_same_thread=False)
@@ -32,33 +34,44 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS notas (
                 )''')
 conn.commit()
 
+def obter_credenciais():
+    """Obtém as credenciais do usuário, gerando token.json se necessário."""
+    creds = None
+    if os.path.exists(TOKEN_PATH):
+        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+    else:
+        if not os.path.exists(CREDENTIALS_PATH):
+            raise FileNotFoundError("credentials.json não encontrado!")
+        flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
+        creds = flow.run_local_server(port=0)
+        with open(TOKEN_PATH, "w") as token:
+            token.write(creds.to_json())
+    return creds
+
 def verificar_emails():
     """Captura e-mails e verifica se possuem notas fiscais XML ou palavras-chave no corpo."""
-    if not os.path.exists(TOKEN_PATH):
-        print("Token de autenticação não encontrado.")
-        return
-    
-    creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
-    service = build("gmail", "v1", credentials=creds)
-    results = service.users().messages().list(userId="me", q="is:unread", maxResults=10).execute()
-    messages = results.get("messages", [])
-    
-    for message in messages:
-        msg = service.users().messages().get(userId="me", id=message["id"]).execute()
+    try:
+        creds = obter_credenciais()
+        service = build("gmail", "v1", credentials=creds)
+        results = service.users().messages().list(userId="me", q="is:unread", maxResults=10).execute()
+        messages = results.get("messages", [])
         
-        # Verifica se o corpo do e-mail contém palavras-chave indicando uma nota fiscal
-        if verificar_corpo_email(msg):
-            for part in msg.get("payload", {}).get("parts", []):
-                if part.get("filename", "").endswith(".xml"):
-                    data = part.get("body", {}).get("data")
-                    if data:
-                        xml_content = base64.urlsafe_b64decode(data).decode("utf-8")
-                        nota = extrair_dados_xml(xml_content)
-                        if nota:
-                            capturar_nota(nota)
+        for message in messages:
+            msg = service.users().messages().get(userId="me", id=message["id"]).execute()
             
-            # Marca o e-mail como lido
-            service.users().messages().modify(userId="me", id=message["id"], body={"removeLabelIds": ["UNREAD"]}).execute()
+            if verificar_corpo_email(msg):
+                for part in msg.get("payload", {}).get("parts", []):
+                    if part.get("filename", "").endswith(".xml"):
+                        data = part.get("body", {}).get("data")
+                        if data:
+                            xml_content = base64.urlsafe_b64decode(data).decode("utf-8")
+                            nota = extrair_dados_xml(xml_content)
+                            if nota:
+                                capturar_nota(nota)
+                
+                service.users().messages().modify(userId="me", id=message["id"], body={"removeLabelIds": ["UNREAD"]}).execute()
+    except Exception as e:
+        print(f"[ERRO] Falha ao verificar e-mails: {e}")
 
 def verificar_corpo_email(msg):
     """Verifica se o corpo do e-mail contém palavras-chave indicando uma nota fiscal."""
@@ -68,10 +81,8 @@ def verificar_corpo_email(msg):
             body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8")
             break
 
-    # Lista de palavras-chave para indicar que o e-mail é relacionado a uma nota fiscal
     palavras_chave = ["nota fiscal", "NFe", "número da nota", "imposto", "nota eletrônica"]
     
-    # Verifica se alguma palavra-chave está presente no corpo do e-mail
     if any(palavra in body.lower() for palavra in palavras_chave):
         print("Corpo do e-mail indica uma nota fiscal.")
         return True
