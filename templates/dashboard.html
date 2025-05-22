@@ -1,0 +1,55 @@
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: #f8f9fa;
+        }
+        .dashboard-title {
+            font-weight: bold;
+            font-size: 2.5rem;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+    </style>
+    <script>
+        async function atualizarStatus(id, status) {
+            const descricao = prompt("Deseja adicionar uma descrição?") || "";
+            await fetch("/notas/acao", {
+                method: "POST",
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id, status, descricao })
+            });
+            location.reload();
+        }
+    </script>
+</head>
+<body>
+    <div class="container py-5">
+        <h1 class="dashboard-title">Notas Fiscais Recebidas</h1>
+        <div class="row justify-content-center g-4">
+            {% for nota in notas %}
+            <div class="col-sm-10 col-md-6 col-lg-4">
+                <div class="card shadow-sm border-0 rounded-4 h-100">
+                    <div class="card-body">
+                        <h5 class="card-title">Nota Nº {{ nota[1] }}</h5>
+                        <p class="mb-1"><strong>Emissor:</strong> {{ nota[2] }}</p>
+                        <p class="mb-1"><strong>Destinatário:</strong> {{ nota[3] }}</p>
+                        <p class="mb-1"><strong>Valor:</strong> R$ {{ '%.2f'|format(nota[4]) }}</p>
+                        <p class="mb-1"><strong>Data de Emissão:</strong> {{ nota[5] }}</p>
+                        <p class="mb-0"><strong>Status:</strong> <span class="badge bg-secondary">{{ nota[6] }}</span></p>
+                    </div>
+                    <div class="card-footer bg-white border-top-0 d-flex justify-content-between">
+                        <button class="btn btn-outline-success btn-sm" onclick="atualizarStatus({{ nota[0] }}, 'aprovada')">Aprovar</button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="atualizarStatus({{ nota[0] }}, 'recusada')">Recusar</button>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</body>
+</html>

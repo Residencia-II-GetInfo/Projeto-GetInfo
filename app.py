@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template 
+from flask import Flask, request, jsonify, render_template, redirect, session
 import base64
 import os
 import re
@@ -12,9 +12,11 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 app = Flask(__name__)
+app.secret_key = "cf9a697f72e1d2c1fadcdfc49b4a6818ee80c8c8c5d5d8d5cdee3c4b1fe68bb2"
+
 
 # Configuração da API do Gmail
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+SCOPES = ["https://mail.google.com/"]
 TOKEN_PATH = "token.json"
 CREDENTIALS_PATH = "credentials.json"
 API_EXTERNA_URL = "http://localhost:5001/api/notas/"
@@ -43,13 +45,15 @@ def obter_credenciais():
         if not os.path.exists(CREDENTIALS_PATH):
             raise FileNotFoundError("credentials.json não encontrado!")
         flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
-        creds = flow.run_local_server(port=0)
+        creds = flow.run_local_server(port=8081)
         with open(TOKEN_PATH, "w") as token:
             token.write(creds.to_json())
     return creds
 
+
 def verificar_emails():
     """Captura e-mails e verifica se possuem notas fiscais XML ou palavras-chave no corpo."""
+    encontrou_nota = False
     try:
         creds = obter_credenciais()
         service = build("gmail", "v1", credentials=creds)
@@ -68,27 +72,49 @@ def verificar_emails():
                             nota = extrair_dados_xml(xml_content)
                             if nota:
                                 capturar_nota(nota)
+                                encontrou_nota = True
                 
                 service.users().messages().modify(userId="me", id=message["id"], body={"removeLabelIds": ["UNREAD"]}).execute()
     except Exception as e:
         print(f"[ERRO] Falha ao verificar e-mails: {e}")
+    
+    return encontrou_nota
+
 
 def verificar_corpo_email(msg):
-    """Verifica se o corpo do e-mail contém palavras-chave indicando uma nota fiscal."""
+    """Verifica se há anexo XML ou palavras-chave no corpo do e-mail (robusto)."""
     body = ""
-    for part in msg.get("payload", {}).get("parts", []):
-        if part["mimeType"] == "text/plain":
-            body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8")
-            break
+    has_xml = False
 
-    palavras_chave = ["nota fiscal", "NFe", "número da nota", "imposto", "nota eletrônica"]
-    
-    if any(palavra in body.lower() for palavra in palavras_chave):
+    payload = msg.get("payload", {})
+    parts = payload.get("parts", [])
+
+    # Se tiver múltiplas partes (com anexos ou HTML/text)
+    for part in parts:
+        filename = part.get("filename", "")
+        if filename.endswith(".xml"):
+            has_xml = True
+        if part.get("mimeType") == "text/plain" and "data" in part.get("body", {}):
+            body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8")
+
+    # Se não tiver parts (e-mail simples), tente direto
+    if not parts and payload.get("mimeType") == "text/plain":
+        if "data" in payload.get("body", {}):
+            body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8")
+
+    palavras_chave = ["nota fiscal", "nfe", "número da nota", "imposto", "nota eletrônica"]
+
+    if has_xml:
+        print("E-mail contém anexo XML. Provável nota fiscal.")
+        return True
+    elif any(p in body.lower() for p in palavras_chave):
         print("Corpo do e-mail indica uma nota fiscal.")
         return True
     else:
-        print("Corpo do e-mail não contém palavras-chave de nota fiscal.")
+        print("E-mail não contém indícios de nota fiscal.")
         return False
+
+
 
 def extrair_dados_xml(xml_content):
     """Extrai informações essenciais de uma nota fiscal XML."""
@@ -113,32 +139,58 @@ def extrair_dados_xml(xml_content):
         return None
 
 def capturar_nota(nota):
-    """Adiciona a nota fiscal ao banco de dados."""
     try:
+        print("Tentando salvar nota:", nota)  # ADICIONE
         cursor.execute("INSERT INTO notas (numero, emissor, destinatario, valor, data_emissao) VALUES (?, ?, ?, ?, ?)",
                        (nota['numero'], nota['emissor'], nota['destinatario'], nota['valor'], nota['data_emissao']))
         conn.commit()
+        print("Nota salva com sucesso!")  # ADICIONE
     except sqlite3.IntegrityError:
         print("Nota fiscal já cadastrada.")
+    except Exception as e:
+        print("Erro ao salvar nota:", e)
 
-@app.route("/notas/", methods=["GET"])
-def listar_notas():
-    """Exibe a lista de notas fiscais."""
+def enviar_para_api_externa(nota):
+    try:
+        response = requests.post(API_EXTERNA_URL, json=nota)
+        print(f"Resposta da API externa: {response.json()}")
+    except Exception as e:
+        print(f"Erro ao enviar para API externa: {e}")
+
+@app.route("/")
+def login():
+    return render_template("login.html")
+
+@app.route("/login", methods=["POST"])
+def autenticar():
+    if request.form['username'] == 'admin' and request.form['password'] == '1234':
+        session['logado'] = True
+        return redirect("/dashboard")
+    return redirect("/")
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/")
+
+@app.route("/dashboard")
+def dashboard():
+    if not session.get('logado'):
+        return redirect("/")
     cursor.execute("SELECT * FROM notas")
     notas = cursor.fetchall()
-    return render_template("notas.html", notas=notas)
+    return render_template("dashboard.html", notas=notas)
 
 @app.route("/notas/acao", methods=["POST"])
 def atualizar_status():
-    """Atualiza o status da nota fiscal.""" 
+    if not session.get('logado'):
+        return jsonify({"error": "Não autorizado."}), 401
     data = request.json
     nota_id = data.get("id")
     status = data.get("status")
     descricao = data.get("descricao", "")
-    
     cursor.execute("UPDATE notas SET status=?, descricao=? WHERE id=?", (status, descricao, nota_id))
     conn.commit()
-    
     if status == "aprovada":
         cursor.execute("SELECT * FROM notas WHERE id=?", (nota_id,))
         nota = cursor.fetchone()
@@ -146,7 +198,6 @@ def atualizar_status():
             "numero": nota[1], "emissor": nota[2], "destinatario": nota[3], "valor": nota[4], "data_emissao": nota[5]
         }
         enviar_para_api_externa(nota_formatada)
-    
     return jsonify({"message": "Status atualizado."})
 
 def enviar_para_api_externa(nota):
@@ -158,11 +209,15 @@ def enviar_para_api_externa(nota):
         print(f"Erro ao enviar para API externa: {e}")
 
 def iniciar_monitoramento():
-    """Verifica e-mails a cada 30 segundos."""
+    """Verifica e-mails a cada 90 segundos se não houver nota."""
     while True:
-        verificar_emails()
-        time.sleep(30)
+        print("\n⏳ Verificando e-mails...")
+        houve_resultado = verificar_emails()
+        if not houve_resultado:
+            print("🕒 Nenhuma nota fiscal encontrada. Aguardando...")
+        time.sleep(90)
+
 
 if __name__ == "__main__":
     threading.Thread(target=iniciar_monitoramento, daemon=True).start()
-    app.run(debug=True)
+    app.run()

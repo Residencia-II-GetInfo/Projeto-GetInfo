@@ -25,6 +25,10 @@ def init_db():
 
 init_db()
 
+@app.route("/")
+def home():
+    return "<h3>API externa rodando. Use /api/notas/ para interagir.</h3>"
+
 @app.route("/api/notas/", methods=["POST"])
 def receber_nota():
     data = request.get_json()
