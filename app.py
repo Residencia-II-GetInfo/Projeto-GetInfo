@@ -10,6 +10,13 @@ import xml.etree.ElementTree as ET
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+import logging
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,  # Ou WARNING para menos verboso
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
 
 app = Flask(__name__)
 app.secret_key = "cf9a697f72e1d2c1fadcdfc49b4a6818ee80c8c8c5d5d8d5cdee3c4b1fe68bb2"
@@ -50,69 +57,110 @@ def obter_credenciais():
             token.write(creds.to_json())
     return creds
 
-
 def verificar_emails():
-    """Captura e-mails e verifica se possuem notas fiscais XML ou palavras-chave no corpo."""
+    """Captura e-mails e verifica se possuem notas fiscais XML."""
     encontrou_nota = False
     try:
         creds = obter_credenciais()
         service = build("gmail", "v1", credentials=creds)
         results = service.users().messages().list(userId="me", q="is:unread", maxResults=10).execute()
         messages = results.get("messages", [])
-        
+
         for message in messages:
             msg = service.users().messages().get(userId="me", id=message["id"]).execute()
-            
-            if verificar_corpo_email(msg):
+            tipo, corpo = verificar_corpo_email(msg)
+
+            if tipo == "xml_inline":
+                nota = extrair_dados_xml(corpo)
+                if nota:
+                    capturar_nota(nota)
+                    encontrou_nota = True
+
+            elif tipo == "xml_attachment":
                 for part in msg.get("payload", {}).get("parts", []):
-                    if part.get("filename", "").endswith(".xml"):
-                        data = part.get("body", {}).get("data")
+                    filename = part.get("filename", "")
+                    if filename.endswith(".xml"):
+                        body_info = part.get("body", {})
+                        data = body_info.get("data")
+                        if not data and "attachmentId" in body_info:
+                            attachment = service.users().messages().attachments().get(
+                                userId="me", messageId=msg["id"], id=body_info["attachmentId"]
+                            ).execute()
+                            data = attachment.get("data")
                         if data:
-                            xml_content = base64.urlsafe_b64decode(data).decode("utf-8")
-                            nota = extrair_dados_xml(xml_content)
-                            if nota:
-                                capturar_nota(nota)
-                                encontrou_nota = True
-                
-                service.users().messages().modify(userId="me", id=message["id"], body={"removeLabelIds": ["UNREAD"]}).execute()
+                            try:
+                                xml_content = base64.urlsafe_b64decode(data).decode("utf-8")
+                                nota = extrair_dados_xml(xml_content)
+                                if nota:
+                                    capturar_nota(nota)
+                                    encontrou_nota = True
+                            except Exception as e:
+                                logging.warning(f"Erro ao decodificar XML: {e}")
+            elif tipo == "keywords":
+                logging.info("Palavras-chave encontradas, mas sem XML.")
+
+            service.users().messages().modify(userId="me", id=message["id"], body={"removeLabelIds": ["UNREAD"]}).execute()
+
     except Exception as e:
-        print(f"[ERRO] Falha ao verificar e-mails: {e}")
+        logging.error(f"Erro ao verificar e-mails: {e}")
     
     return encontrou_nota
 
 
+def extrair_texto(part):
+    """Extrai o texto de uma parte se for text/plain ou text/html."""
+    if part.get("mimeType", "").startswith("text/"):
+        data = part.get("body", {}).get("data")
+        if data:
+            try:
+                return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+            except Exception:
+                pass
+    # Se for multipart, tenta recursivamente
+    if part.get("parts"):
+        texto = ""
+        for subpart in part["parts"]:
+            texto += extrair_texto(subpart) or ""
+        return texto
+    return ""
+
 def verificar_corpo_email(msg):
-    """Verifica se há anexo XML ou palavras-chave no corpo do e-mail (robusto)."""
+    """Verifica se há anexo ou conteúdo XML ou palavras-chave no corpo."""
+    has_xml_attachment = False
     body = ""
-    has_xml = False
-
     payload = msg.get("payload", {})
-    parts = payload.get("parts", [])
 
-    # Se tiver múltiplas partes (com anexos ou HTML/text)
-    for part in parts:
-        filename = part.get("filename", "")
-        if filename.endswith(".xml"):
-            has_xml = True
-        if part.get("mimeType") == "text/plain" and "data" in part.get("body", {}):
-            body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8")
+    def analisar_partes(partes):
+        nonlocal has_xml_attachment, body
+        for part in partes:
+            filename = part.get("filename", "")
+            if filename.endswith(".xml"):
+                has_xml_attachment = True
+            if part.get("parts"):
+                analisar_partes(part["parts"])
+            else:
+                texto = extrair_texto(part)
+                if texto:
+                    body += texto + "\n"
 
-    # Se não tiver parts (e-mail simples), tente direto
-    if not parts and payload.get("mimeType") == "text/plain":
-        if "data" in payload.get("body", {}):
-            body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8")
+    if "parts" in payload:
+        analisar_partes(payload["parts"])
+    else:
+        texto = extrair_texto(payload)
+        if texto:
+            body += texto
+
+    if "<NFe" in body and "</NFe>" in body:
+        return "xml_inline", body
 
     palavras_chave = ["nota fiscal", "nfe", "número da nota", "imposto", "nota eletrônica"]
-
-    if has_xml:
-        print("E-mail contém anexo XML. Provável nota fiscal.")
-        return True
+    if has_xml_attachment:
+        return "xml_attachment", None
     elif any(p in body.lower() for p in palavras_chave):
-        print("Corpo do e-mail indica uma nota fiscal.")
-        return True
+        return "keywords", None
     else:
-        print("E-mail não contém indícios de nota fiscal.")
-        return False
+        return None, None
+
 
 
 
@@ -140,22 +188,23 @@ def extrair_dados_xml(xml_content):
 
 def capturar_nota(nota):
     try:
-        print("Tentando salvar nota:", nota)  # ADICIONE
         cursor.execute("INSERT INTO notas (numero, emissor, destinatario, valor, data_emissao) VALUES (?, ?, ?, ?, ?)",
                        (nota['numero'], nota['emissor'], nota['destinatario'], nota['valor'], nota['data_emissao']))
         conn.commit()
-        print("Nota salva com sucesso!")  # ADICIONE
+        logging.info(f"Nota {nota['numero']} salva com sucesso.")
     except sqlite3.IntegrityError:
-        print("Nota fiscal já cadastrada.")
+        logging.info(f"Nota {nota['numero']} já cadastrada.")
     except Exception as e:
-        print("Erro ao salvar nota:", e)
+        logging.error(f"Erro ao salvar nota: {e}")
+
 
 def enviar_para_api_externa(nota):
     try:
         response = requests.post(API_EXTERNA_URL, json=nota)
-        print(f"Resposta da API externa: {response.json()}")
+        logging.info(f"Enviado para API externa: {response.status_code}")
     except Exception as e:
-        print(f"Erro ao enviar para API externa: {e}")
+        logging.error(f"Erro ao enviar para API externa: {e}")
+
 
 @app.route("/")
 def login():
