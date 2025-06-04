@@ -18,6 +18,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
 
+
 app = Flask(__name__)
 app.secret_key = "cf9a697f72e1d2c1fadcdfc49b4a6818ee80c8c8c5d5d8d5cdee3c4b1fe68bb2"
 
