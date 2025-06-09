@@ -1,4 +1,59 @@
-token.json
-token.json
-token.json
-credentials.json
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Caches
+*.cache
+*.log
+
+# Virtual environment
+venv/
+ENV/
+env/
+.venv/
+.ENV/
+
+# VS Code
+.vscode/
+
+# PyCharm
+.idea/
+
+# Flask/Python specific
+instance/
+*.db
+*.sqlite3
+*.pkl
+*.h5
+
+# dotenv
+.env
+*.env
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Uploads/temp
+uploads/
+*.bak
+*.swp
+*.tmp
+
+# Compiled files
+*.so
+
+# Coverage reports
+htmlcov/
+.coverage
+.tox/
+nosetests.xml
+coverage.xml
+*.cover
+
+# Flask-Migrate (migrations dir, if not in use)
+migrations/
+
+# Jupyter notebooks (if used)
+.ipynb_checkpoints/
