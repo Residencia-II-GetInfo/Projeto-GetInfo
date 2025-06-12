@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, session, render_template, redirect
+from flask import Flask, request, jsonify, session, render_template, redirect 
 import base64
 import os
 import time
@@ -41,7 +41,8 @@ cursor.execute("""
         valor REAL,
         data_emissao TEXT,
         status TEXT DEFAULT 'pendente',
-        descricao TEXT
+        descricao TEXT,
+        xml_content TEXT
     )""")
 conn.commit()
 
@@ -158,11 +159,11 @@ def extrair_dados_xml(xml_content):
             "emissor": root.findtext(f".//{tag('emit')}/{tag('xNome')}"),
             "destinatario": root.findtext(f".//{tag('dest')}/{tag('xNome')}"),
             "valor": float(root.findtext(f".//{tag('ICMSTot')}/{tag('vNF')}")),
-            "data_emissao": root.findtext(f".//{tag('ide')}/{tag('dhEmi')}")[:10]
+            "data_emissao": root.findtext(f".//{tag('ide')}/{tag('dhEmi')}")[:10],
+            "xml_content": xml_content
         }
 
     except Exception as e:
-        import logging
         logging.error("Erro XML: %s", e)
         return None
 
@@ -201,9 +202,10 @@ def worker():
             continue
         try:
             cursor.execute("""
-                INSERT INTO notas(numero, emissor, destinatario, valor, data_emissao)
-                VALUES(?,?,?,?,?)""",
-                (nota["numero"],nota["emissor"],nota["destinatario"],nota["valor"],nota["data_emissao"])
+                INSERT INTO notas(numero, emissor, destinatario, valor, data_emissao, xml_content)
+                VALUES(?,?,?,?,?,?)""",
+                (nota["numero"], nota["emissor"], nota["destinatario"], 
+                 nota["valor"], nota["data_emissao"], nota["xml_content"])
             )
             conn.commit()
             logging.info("Nota %s salva", nota["numero"])
@@ -217,8 +219,12 @@ def worker():
 
 def capturar_nota(nota):
     try:
-        cursor.execute("INSERT INTO notas (numero, emissor, destinatario, valor, data_emissao) VALUES (?, ?, ?, ?, ?)",
-                       (nota['numero'], nota['emissor'], nota['destinatario'], nota['valor'], nota['data_emissao']))
+        cursor.execute("""
+            INSERT INTO notas (numero, emissor, destinatario, valor, data_emissao, xml_content) 
+            VALUES (?, ?, ?, ?, ?, ?)""",
+            (nota['numero'], nota['emissor'], nota['destinatario'], 
+             nota['valor'], nota['data_emissao'], nota['xml_content'])
+        )
         conn.commit()
         logging.info(f"Nota {nota['numero']} salva com sucesso.")
     except sqlite3.IntegrityError:
@@ -236,7 +242,6 @@ def enviar_para_api_externa(nota):
 # Configura threads
 threading.Thread(target=polling_emails, daemon=True).start()
 threading.Thread(target=worker, daemon=True).start()
-
 
 @app.route("/")
 def login():
@@ -276,18 +281,21 @@ def atualizar_status():
         cursor.execute("SELECT * FROM notas WHERE id=?", (nota_id,))
         nota = cursor.fetchone()
         nota_formatada = {
-            "numero": nota[1], "emissor": nota[2], "destinatario": nota[3], "valor": nota[4], "data_emissao": nota[5]
+            "numero": nota[1], "emissor": nota[2], "destinatario": nota[3], 
+            "valor": nota[4], "data_emissao": nota[5], "xml_content": nota[8]
         }
         enviar_para_api_externa(nota_formatada)
     return jsonify({"message": "Status atualizado."})
 
-def enviar_para_api_externa(nota):
-    """Envia a nota fiscal aprovada para a API externa."""
-    try:
-        response = requests.post(API_EXTERNA_URL, json=nota)
-        print(f"Resposta da API externa: {response.json()}")
-    except Exception as e:
-        print(f"Erro ao enviar para API externa: {e}")
+@app.route("/notas/<int:id>/xml")
+def visualizar_xml(id):
+    if not session.get('logado'):
+        return redirect("/")
+    cursor.execute("SELECT xml_content FROM notas WHERE id=?", (id,))
+    xml_content = cursor.fetchone()
+    if xml_content:
+        return render_template("visualizar_xml.html", xml_content=xml_content[0])
+    return "Nota não encontrada", 404
 
 def iniciar_monitoramento():
     """Verifica e-mails a cada 90 segundos se não houver nota."""
@@ -357,7 +365,6 @@ def chat():
         return jsonify({"resposta": resposta_texto})
     except Exception as e:
         return jsonify({"erro": f"Erro interno do servidor: {str(e)}"}), 500
-
 
 if __name__ == "__main__":
     threading.Thread(target=iniciar_monitoramento, daemon=True).start()
