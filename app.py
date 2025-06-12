@@ -17,14 +17,14 @@ from groq import Groq
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET")
+app.secret_key = "cf9a697f72e1d2c1fadcdfc49b4a6818ee80c8c8c5d5d8d5cdee3c4b1fe68bb2"
 
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY", "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"))
+groq_client = Groq(api_key="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")
 
 SCOPES = ["https://mail.google.com/"]
 TOKEN_PATH = "token.json"
 CREDENTIALS_PATH = "credentials.json"
-API_EXTERNA_URL = os.getenv("API_EXTERNA_URL", "http://localhost:5001/api/notas/")
+API_EXTERNA_URL = "http://localhost:5002/api/notas/"
 
 # Fila para processar notas
 fila_notas = queue.Queue()
@@ -65,7 +65,7 @@ def obter_credenciais():
         if not os.path.exists(CREDENTIALS_PATH):
             raise FileNotFoundError("credentials.json não encontrado!")
         flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_PATH, SCOPES)
-        creds = flow.run_local_server(port=8080)
+        creds = flow.run_local_server(port=8081)
 
     # Salva/atualiza o token
     with open(TOKEN_PATH, "w") as f:
@@ -145,16 +145,24 @@ def verificar_corpo_email(msg):
 
 def extrair_dados_xml(xml_content):
     try:
-        ns = {"ns":"http://www.portalfiscal.inf.br/nfe"}
+        # Namespace padrão sem prefixo
+        ns = {"": "http://www.portalfiscal.inf.br/nfe"}
         root = ET.fromstring(xml_content)
+
+        # ET exige que o namespace padrão seja colocado entre {} nas tags
+        def tag(nome):
+            return f"{{{ns['']}}}{nome}"
+
         return {
-            "numero": root.findtext(".//ns:infNFe/ns:ide/ns:nNF", ns),
-            "emissor": root.findtext(".//ns:emit/ns:xNome", ns),
-            "destinatario": root.findtext(".//ns:dest/ns:xNome", ns),
-            "valor": float(root.findtext(".//ns:ICMSTot/ns:vNF", ns)),
-            "data_emissao": root.findtext(".//ns:ide/ns:dhEmi", ns)[:10]
+            "numero": root.findtext(f".//{tag('infNFe')}/{tag('ide')}/{tag('nNF')}"),
+            "emissor": root.findtext(f".//{tag('emit')}/{tag('xNome')}"),
+            "destinatario": root.findtext(f".//{tag('dest')}/{tag('xNome')}"),
+            "valor": float(root.findtext(f".//{tag('ICMSTot')}/{tag('vNF')}")),
+            "data_emissao": root.findtext(f".//{tag('ide')}/{tag('dhEmi')}")[:10]
         }
+
     except Exception as e:
+        import logging
         logging.error("Erro XML: %s", e)
         return None
 
@@ -353,4 +361,4 @@ def chat():
 
 if __name__ == "__main__":
     threading.Thread(target=iniciar_monitoramento, daemon=True).start()
-    app.run()
+    app.run(port=5001)
