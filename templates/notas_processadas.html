@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Notas Processadas</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      background-color: #f8f9fa;
+    }
+    .dashboard-title {
+      font-weight: 600;
+      font-size: 2.2rem;
+      margin-top: 40px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .nota-card {
+      border-radius: 16px;
+      border: none;
+      box-shadow: 0 0 12px rgba(0, 0, 0, 0.05);
+      transition: 0.3s;
+    }
+    .nota-card:hover {
+      box-shadow: 0 0 18px rgba(0, 0, 0, 0.1);
+    }
+    .search-box {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 0 12px rgba(0, 0, 0, 0.06);
+      max-width: 900px;
+      margin: 0 auto 40px auto;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar navbar-dark bg-dark shadow-sm">
+  <div class="container-fluid">
+    <span class="navbar-brand mb-0 h1">Notas Processadas</span>
+    <div class="d-flex">
+      <a href="/dashboard" class="btn btn-outline-light me-2">Pendentes</a>
+      <a href="/notas/processadas" class="btn btn-outline-light me-2">Processadas</a>
+      <a href="/logout" class="btn btn-outline-light">Sair</a>
+    </div>
+  </div>
+</nav>
+
+<!-- Conteúdo -->
+<div class="container py-4">
+  <h1 class="dashboard-title">Notas Fiscais Aprovadas ou Recusadas</h1>
+
+  <!-- Barra de Pesquisa Estilizada -->
+  <form method="get" class="search-box">
+    <div class="row g-3 align-items-end">
+      <div class="col-md-5">
+        <label for="termo" class="form-label">Pesquisar por Emissor</label>
+        <input type="text" name="termo" id="termo" class="form-control" placeholder="Ex: Nome da empresa" value="{{ termo }}">
+      </div>
+      <div class="col-md-4">
+        <label for="data" class="form-label">Filtrar por Data de Emissão</label>
+        <input type="date" name="data" id="data" class="form-control" value="{{ data }}">
+      </div>
+      <div class="col-md-3 d-grid gap-2 d-md-flex justify-content-md-end">
+        <button type="submit" class="btn btn-primary">Pesquisar</button>
+        <a href="/notas/processadas" class="btn btn-secondary">Limpar</a>
+      </div>
+    </div>
+  </form>
+
+  <!-- Lista de Notas -->
+  <div class="row justify-content-center g-4">
+    {% for nota in notas %}
+    <div class="col-sm-10 col-md-6 col-lg-4">
+      <div class="card nota-card h-100">
+        <div class="card-body">
+          <h5 class="card-title mb-3">Nota Nº {{ nota[1] }}</h5>
+          <p><strong>Emissor:</strong> {{ nota[2] }}</p>
+          <p><strong>Destinatário:</strong> {{ nota[3] }}</p>
+          <p><strong>Valor:</strong> R$ {{ '%.2f'|format(nota[4]) }}</p>
+          <p><strong>Data de Emissão:</strong> {{ nota[5] }}</p>
+          <p><strong>Status:</strong>
+            <span class="badge {{ 'bg-success' if nota[6]=='aprovada' else 'bg-danger' }}">{{ nota[6] }}</span>
+          </p>
+          {% if nota[7] %}
+          <p><strong>Descrição:</strong> {{ nota[7] }}</p>
+          {% endif %}
+        </div>
+        <div class="card-footer bg-white border-top-0 d-flex justify-content-end">
+          <a href="/notas/{{ nota[0] }}/xml" class="btn btn-outline-primary btn-sm me-2">Visualizar</a>
+          <a href="/notas/{{ nota[0] }}/download" class="btn btn-outline-secondary btn-sm">Baixar</a>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+</body>
+</html>

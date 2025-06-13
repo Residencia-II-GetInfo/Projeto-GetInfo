@@ -123,6 +123,7 @@ def verificar_emails():
     
     return encontrou_nota
 
+
 def extrair_texto(part):
     if part.get("mimeType", "").startswith("text/"):
         data = part.get("body", {}).get("data")
@@ -263,9 +264,10 @@ def logout():
 def dashboard():
     if not session.get('logado'):
         return redirect("/")
-    cursor.execute("SELECT * FROM notas")
+    cursor.execute("SELECT * FROM notas WHERE status = 'pendente'")
     notas = cursor.fetchall()
     return render_template("dashboard.html", notas=notas)
+
 
 @app.route("/notas/acao", methods=["POST"])
 def atualizar_status():
@@ -365,6 +367,49 @@ def chat():
         return jsonify({"resposta": resposta_texto})
     except Exception as e:
         return jsonify({"erro": f"Erro interno do servidor: {str(e)}"}), 500
+    
+@app.route("/notas/<int:id>/download")
+def baixar_xml(id):
+    if not session.get('logado'):
+        return redirect("/")
+    cursor.execute("SELECT numero, xml_content FROM notas WHERE id=?", (id,))
+    resultado = cursor.fetchone()
+    if resultado:
+        numero, xml_content = resultado
+        filename = f"nota_{numero}.xml"
+        return (
+            xml_content,
+            200,
+            {
+                "Content-Type": "application/xml; charset=utf-8",
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+    return "Nota não encontrada", 404
+
+@app.route("/notas/processadas")
+def notas_processadas():
+    if not session.get('logado'):
+        return redirect("/")
+
+    termo = request.args.get("termo", "").strip()
+    data = request.args.get("data", "").strip()
+
+    sql = "SELECT * FROM notas WHERE status != 'pendente'"
+    params = []
+
+    if termo:
+        sql += " AND emissor LIKE ?"
+        params.append(f"%{termo}%")
+    if data:
+        sql += " AND data_emissao = ?"
+        params.append(data)
+
+    cursor.execute(sql, tuple(params))
+    notas = cursor.fetchall()
+    return render_template("notas_processadas.html", notas=notas, termo=termo, data=data)
+
+
 
 if __name__ == "__main__":
     threading.Thread(target=iniciar_monitoramento, daemon=True).start()

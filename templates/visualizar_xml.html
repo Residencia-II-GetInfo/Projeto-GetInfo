@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Visualizar Nota Fiscal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body {
+      background-color: #f8f9fa;
+      font-family: monospace;
+      min-height: 100vh;
+    }
+    .card {
+      border-radius: 12px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    pre {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      max-height: 70vh;
+      overflow-y: auto;
+      background-color: #ffffff;
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar navbar-dark bg-dark mb-4">
+    <div class="container-fluid">
+      <span class="navbar-brand mb-0 h1">Visualizador de Nota</span>
+      <a href="/dashboard" class="btn btn-outline-light">Voltar</a>
+    </div>
+  </nav>
+
+  <!-- Conteúdo -->
+  <div class="container">
+    <div class="row justify-content-center">
+      <div class="col-lg-10">
+        <div class="card p-4">
+          <h4 class="mb-4 text-center text-primary">Conteúdo da Nota Fiscal (XML)</h4>
+          <pre>{{ xml_content | e }}</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

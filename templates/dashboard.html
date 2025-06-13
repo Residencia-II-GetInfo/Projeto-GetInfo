@@ -72,17 +72,32 @@
   </style>
   <script>
     async function atualizarStatus(id, status) {
-      let descricao = "";
-      if (status === 'recusada') {
-        descricao = prompt("Deseja adicionar uma descrição?") || "";
-      }
-      await fetch("/notas/acao", {
-        method: "POST",
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, status, descricao })
-      });
-      location.reload();
+    let descricao = "";
+    if (status === 'recusada') {
+      abrirModalJustificativa(id); // Mantém o modal para recusa
+      return;
     }
+
+    await fetch("/notas/acao", {
+      method: "POST",
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, status, descricao })
+    });
+
+    const card = document.getElementById("nota-" + id);
+    if (card) card.remove();
+
+    verificarSeTemNotas();
+  }
+
+  function verificarSeTemNotas() {
+    const cards = document.querySelectorAll(".nota-card");
+    if (cards.length === 0) {
+      const container = document.getElementById("notas-container");
+      container.innerHTML = `<div class="text-center text-muted py-5"><h4>Nenhuma nota pendente encontrada.</h4></div>`;
+    }
+  }
+
 
     async function enviarMensagem() {
       const input = document.getElementById('chat-input');
@@ -132,6 +147,36 @@
       const chatbot = document.getElementById('chatbot');
       chatbot.style.display = chatbot.style.display === 'none' ? 'block' : 'none';
     }
+    let modal;
+document.addEventListener('DOMContentLoaded', () => {
+  modal = new bootstrap.Modal(document.getElementById('modalJustificativa'));
+});
+
+function abrirModalJustificativa(idNota) {
+  document.getElementById('notaIdInput').value = idNota;
+  document.getElementById('justificativaInput').value = '';
+  modal.show();
+}
+
+async function enviarJustificativa() {
+  const id = document.getElementById('notaIdInput').value;
+  const descricao = document.getElementById('justificativaInput').value.trim();
+
+  if (!descricao) {
+    alert('A justificativa não pode estar vazia.');
+    return;
+  }
+
+  await fetch("/notas/acao", {
+    method: "POST",
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, status: 'recusada', descricao })
+  });
+
+  modal.hide();
+  location.reload();
+}
+
   </script>
 </head>
 <body>
@@ -139,33 +184,52 @@
 <nav class="navbar navbar-dark bg-dark">
   <div class="container-fluid">
     <span class="navbar-brand mb-0 h1">Dashboard</span>
-    <a href="/" class="btn btn-outline-light">Sair</a>
+    <div>
+      <a href="/dashboard" class="btn btn-outline-light me-2">Pendentes</a>
+      <a href="/notas/processadas" class="btn btn-outline-light me-2">Processadas</a>
+      <a href="/logout" class="btn btn-outline-light">Sair</a>
+    </div>
   </div>
 </nav>
 
+
 <div class="container py-5">
   <h1 class="dashboard-title">Notas Fiscais Recebidas</h1>
-  <div class="row justify-content-center g-4">
-    {% for nota in notas %}
-    <div class="col-sm-10 col-md-6 col-lg-4">
-      <div class="card shadow-sm border-0 rounded-4 h-100">
-        <div class="card-body">
-          <h5 class="card-title">Nota Nº {{ nota[1] }}</h5>
-          <p class="mb-1"><strong>Emissor:</strong> {{ nota[2] }}</p>
-          <p class="mb-1"><strong>Destinatário:</strong> {{ nota[3] }}</p>
-          <p class="mb-1"><strong>Valor:</strong> R$ {{ '%.2f'|format(nota[4]) }}</p>
-          <p class="mb-1"><strong>Data de Emissão:</strong> {{ nota[5] }}</p>
-          <p class="mb-0"><strong>Status:</strong> <span class="badge bg-secondary">{{ nota[6] }}</span></p>
-        </div>
-        <div class="card-footer bg-white border-top-0 d-flex justify-content-between">
-          <button class="btn btn-outline-success btn-sm" onclick="atualizarStatus({{ nota[0] }}, 'aprovada')">Aprovar</button>
-          <button class="btn btn-outline-danger btn-sm" onclick="atualizarStatus({{ nota[0] }}, 'recusada')">Recusar</button>
+
+  <div id="notas-container" class="row justify-content-center g-4">
+    {% if notas %}
+      {% for nota in notas %}
+      <div class="col-sm-10 col-md-6 col-lg-4" id="nota-{{ nota[0] }}">
+        <div class="card shadow-sm border-0 rounded-4 h-100 nota-card">
+          <div class="card-body">
+            <h5 class="card-title">Nota Nº {{ nota[1] }}</h5>
+            <p class="mb-1"><strong>Emissor:</strong> {{ nota[2] }}</p>
+            <p class="mb-1"><strong>Destinatário:</strong> {{ nota[3] }}</p>
+            <p class="mb-1"><strong>Valor:</strong> R$ {{ '%.2f'|format(nota[4]) }}</p>
+            <p class="mb-1"><strong>Data de Emissão:</strong> {{ nota[5] }}</p>
+            <p class="mb-0"><strong>Status:</strong> <span class="badge bg-secondary">{{ nota[6] }}</span></p>
+          </div>
+          <div class="card-footer bg-white border-top-0 d-flex justify-content-between">
+            <div>
+              <button class="btn btn-outline-success btn-sm" onclick="atualizarStatus({{ nota[0] }}, 'aprovada')">Aprovar</button>
+              <button class="btn btn-outline-danger btn-sm" onclick="abrirModalJustificativa({{ nota[0] }})">Recusar</button>
+            </div>
+            <div>
+              <a href="/notas/{{ nota[0] }}/xml" class="btn btn-outline-primary btn-sm">Visualizar</a>
+              <a href="/notas/{{ nota[0] }}/download" class="btn btn-outline-secondary btn-sm">Baixar</a>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
-    {% endfor %}
+      {% endfor %}
+    {% else %}
+      <div class="col-12 text-center text-muted py-5">
+        <h4>Nenhuma nota pendente encontrada.</h4>
+      </div>
+    {% endif %}
   </div>
 </div>
+
 
 <!-- Bolha flutuante -->
 <button id="chatbot-button" onclick="toggleChatbot()">💬</button>
@@ -181,6 +245,26 @@
     <button id="chat-send" onclick="enviarMensagem()">Enviar</button>
   </div>
 </div>
+<!-- Modal de Justificativa -->
+<div class="modal fade" id="modalJustificativa" tabindex="-1" aria-labelledby="modalJustificativaLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content rounded-3 shadow">
+      <div class="modal-header bg-danger text-white">
+        <h5 class="modal-title" id="modalJustificativaLabel">Justificativa da Recusa</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+      <div class="modal-body">
+        <textarea id="justificativaInput" class="form-control" rows="4" placeholder="Descreva o motivo da recusa..."></textarea>
+        <input type="hidden" id="notaIdInput">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-danger" onclick="enviarJustificativa()">Confirmar Recusa</button>
+      </div>
+    </div>
+  </div>
+</div>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
